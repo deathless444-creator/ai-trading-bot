@@ -8,9 +8,10 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 import email.utils
+import time
 from streamlit_cookies_manager import EncryptedCookieManager
 
-# --- 1. ตั้งค่าหน้าตาโปรแกรม (Theme & Layout) และ Custom CSS สำหรับ UI Pro ---
+# --- 1. ตั้งค่าหน้าตาโปรแกรม (Theme & Layout) ---
 st.set_page_config(page_title="AI Trading Pro Suite", layout="wide")
 
 st.markdown("""
@@ -28,15 +29,11 @@ st.markdown("""
     
     .ai-analysis-box { background-color: #161b22; padding: 20px; border-radius: 10px; border: 1px solid #30363d; margin-bottom: 15px; }
     
-    .forecast-table { background-color: #161b22; border-radius: 10px; border: 1px solid #30363d; width: 100%; font-size: 0.85em; margin-bottom: 15px;}
-    .forecast-header { background-color: #1c2331; color: #f0f6fc; font-weight: bold; text-align: center;}
-    .forecast-row { color: #f0f6fc; border-bottom: 1px solid #30363d; text-align: center;}
-    
     .warning-box { background-color: #332b00; padding: 15px; border-radius: 10px; border-left: 5px solid #ffcc00; margin-top: 10px; color: #ffdd33;}
     </style>
     """, unsafe_allow_html=True)
 
-# --- ระบบจำ API Key แยกรายบุคคล (Cookies) ---
+# --- ระบบจำ API Key และ Favorites (Cookies) ---
 cookies = EncryptedCookieManager(prefix="aitradingpro", password="super_secret_trading_password_123")
 if not cookies.ready():
     st.stop()
@@ -88,13 +85,14 @@ def get_stock_news(ticker):
 with st.sidebar:
     st.markdown("<h1>⚙️ Advanced Settings</h1>", unsafe_allow_html=True)
     
+    # [ส่วน API Key]
     saved_api_key = cookies.get("gemini_api_key", "")
     api_key = st.text_input("🔑 Gemini API Key", value=saved_api_key, type="password")
     
     if api_key and api_key != saved_api_key:
         cookies["gemini_api_key"] = api_key
         cookies.save()
-        st.success("✅ บันทึก Key ลงเครื่องนี้แล้ว!")
+        st.success("✅ บันทึก Key แล้ว!")
     
     st.markdown("---")
     st.subheader("🤖 เลือกโมเดล AI")
@@ -103,16 +101,62 @@ with st.sidebar:
     )
     
     st.markdown("---")
-    st.subheader("🎯 เลือกสินทรัพย์")
-    ticker = st.text_input("Ticker เอง:", value="NVDA").split(" ")[0]
+    
+    # 🌟 [ระบบ Favorites ใหม่] 🌟
+    st.subheader("⭐ หุ้นโปรด (Watchlist)")
+    
+    # ดึงรายชื่อหุ้นที่เคยเซฟไว้ออกมาจากคุกกี้
+    fav_str = cookies.get("fav_tickers", "")
+    fav_list = [x.strip() for x in fav_str.split(",") if x.strip()]
+    
+    selected_fav = "-- ไม่เลือก --"
+    if fav_list:
+        selected_fav = st.selectbox("เลือกเปิดกราฟจากรายการโปรด:", ["-- ไม่เลือก --"] + fav_list)
+    else:
+        st.info("คุณยังไม่ได้บันทึกหุ้นโปรด")
+    
+    st.markdown("---")
+    st.subheader("🎯 ค้นหาสินทรัพย์")
+    quick_tickers = ["NVDA", "AVGO", "ONDS", "RKLB", "GC=F (ทองคำ)"]
+    selected_quick = st.selectbox("รายการด่วน:", quick_tickers)
+    
+    # เช็คว่าผู้ใช้กดเลือกจาก Favorites หรือพิมพ์เอง
+    if selected_fav != "-- ไม่เลือก --":
+        default_ticker = selected_fav
+    else:
+        default_ticker = selected_quick.split(" ")[0]
+        
+    ticker = st.text_input("พิมพ์ Ticker เอง:", value=default_ticker).upper().strip()
+    
+    # 🌟 [ปุ่ม Add / Remove Favorites] 🌟
+    if ticker:
+        if ticker in fav_list:
+            if st.button(f"❌ เอา {ticker} ออกจากรายการโปรด", use_container_width=True):
+                fav_list.remove(ticker)
+                cookies["fav_tickers"] = ",".join(fav_list)
+                cookies.save()
+                st.rerun() # รีเฟรชหน้าจอเพื่อให้ปุ่มอัปเดตทันที
+        else:
+            if st.button(f"⭐ เพิ่ม {ticker} ลงรายการโปรด", type="primary", use_container_width=True):
+                fav_list.append(ticker)
+                cookies["fav_tickers"] = ",".join(fav_list)
+                cookies.save()
+                st.rerun()
     
     st.markdown("---")
     st.subheader("⏱️ โหมดหน้าจอกราฟ")
-    trade_mode = st.radio("เลือก Timeframe:", ["⚡ Intraday (15 นาที)", "📅 Daily (กราฟรายวัน)"])
+    trade_mode = st.radio("เลือก Timeframe:", ["🔴 Live (กราฟ 1 นาที)", "⚡ Intraday (15 นาที)", "📅 Daily (รายวัน)"])
+    
+    st.markdown("---")
+    st.subheader("🔄 ระบบเรียลไทม์")
+    auto_refresh = st.toggle("เปิด Auto-Refresh (อัปเดตทุก 60 วิ)")
 
-if "Intraday" in trade_mode:
+if "Live" in trade_mode:
+    period_val, interval_val = "1d", "1m"
+    vol_compare_text = "เทียบแท่งต่อแท่ง (ทุก 1 นาที)"
+elif "Intraday" in trade_mode:
     period_val, interval_val = "5d", "15m"
-    vol_compare_text = "เทียบแท่งต่อแท่ง (ทุกๆ 15 นาที)"
+    vol_compare_text = "เทียบแท่งต่อแท่ง (ทุก 15 นาที)"
 else:
     period_val, interval_val = "6mo", "1d"
     vol_compare_text = "เทียบวันต่อวัน (Daily)"
@@ -133,8 +177,10 @@ try:
         with tab1:
             left_col, right_col = st.columns([2, 1])
             with left_col:
-                if "Intraday" in trade_mode: x_labels = df.index.strftime('%Y-%m-%d %H:%M')
-                else: x_labels = df.index.strftime('%Y-%m-%d')
+                if "Daily" in trade_mode: 
+                    x_labels = df.index.strftime('%Y-%m-%d')
+                else: 
+                    x_labels = df.index.strftime('%H:%M')
                     
                 fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
                 fig.add_trace(go.Candlestick(x=x_labels, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price'), row=1, col=1)
@@ -151,7 +197,7 @@ try:
             with right_col:
                 st.markdown("<h3 style='margin-bottom: 10px;'>🤖 AI Advanced Analysis</h3>", unsafe_allow_html=True)
                 
-                if st.button(f"⚡ วิเคราะห์โครงสร้าง {ticker} ของจริง"):
+                if st.button(f"⚡ วิเคราะห์โครงสร้าง {ticker} ของจริง", use_container_width=True):
                     if not api_key: st.error("กรุณาใส่ API Key ด้านซ้ายก่อนครับ")
                     else:
                         with st.spinner(f"กำลังส่งข้อมูล {ticker} ให้ AI ประมวลผล..."):
@@ -159,7 +205,6 @@ try:
                                 model = get_ai_model(api_key, ai_model_name)
                                 data_str = df[['Close', 'Volume', 'EMA20', 'EMA50', 'RSI']].tail(15).to_string()
                                 
-                                # บังคับให้ AI ตอบกลับมาเป็นโครงสร้างข้อมูล เพื่อให้เราเอามาจัดหน้า UI เอง
                                 prompt = f"""
                                 คุณคือนักวิเคราะห์เทคนิคขั้นสูง วิเคราะห์ข้อมูล 15 แท่งล่าสุดของ {ticker}. ราคาปัจจุบันคือ {current_price:.2f}
                                 ข้อมูล: {data_str}
@@ -178,14 +223,12 @@ try:
                                 response = model.generate_content(prompt)
                                 res_text = response.text
                                 
-                                # ระบบดึงข้อมูลจาก AI มาแยกใส่ตัวแปร
                                 parsed_data = {"TREND": "-", "ZONE": "-", "SIGNAL": "-", "CONF": "-", "ENTRY": "-", "SL": "-", "TP": "-", "REASON": res_text}
                                 for line in res_text.strip().split('\n'):
                                     if ":" in line:
                                         key, val = line.split(":", 1)
                                         parsed_data[key.strip().upper()] = val.strip()
 
-                                # จัดสีตามสัญญาน (เขียว=BUY, แดง=SELL, เหลือง=WAIT)
                                 sig = parsed_data.get("SIGNAL", "WAIT").upper()
                                 if "BUY" in sig:
                                     s_color, s_bg, s_icon = "#15f1ac", "#0d2e23", "🟢 BUY"
@@ -194,7 +237,6 @@ try:
                                 else:
                                     s_color, s_bg, s_icon = "#f9c74f", "#332b00", "🟡 WAIT"
 
-                                # สร้าง UI สวยๆ ด้วยข้อมูลจริงจาก AI
                                 real_smc_html = f"""
                                 <div class='smc-box'>
                                     <div class='smc-title'>⚙️ Market Structure: {ticker}</div>
@@ -234,7 +276,7 @@ try:
             dca_budget = st.number_input("งบประมาณ DCA ต่อเดือน (USD $)", min_value=10, value=500, step=50)
             st.info(f"💡 ด้วยงบ **${dca_budget}** คุณสามารถสะสม {ticker} ได้ประมาณ **{dca_budget / current_price:.4f} หุ้น** ที่ราคาปัจจุบัน (${current_price:,.2f})")
             
-            if st.button("🤖 ให้ AI ช่วยวางแผนแบ่งไม้ DCA"):
+            if st.button("🤖 ให้ AI ช่วยวางแผนแบ่งไม้ DCA", use_container_width=True):
                 if not api_key: st.error("กรุณาใส่ API Key")
                 else:
                     with st.spinner(f"กำลังคำนวณแนวรับด้วย {ai_model_name}..."):
@@ -244,7 +286,7 @@ try:
                         try:
                             response = model.generate_content(prompt)
                             st.markdown(f"<div class='ai-analysis-box'>{response.text}</div>", unsafe_allow_html=True)
-                        except Exception as e:
+                        except Exception:
                             st.error("ระบบขัดข้อง กรุณาลองใหม่")
 
         # ================= TAB 3: News & Sentiment =================
@@ -260,16 +302,15 @@ try:
         # ================= TAB 4: Fundamental Analysis =================
         with tab4:
             st.markdown(f"<h2>🏢 เจาะลึกพื้นฐานธุรกิจ: {ticker}</h2>", unsafe_allow_html=True)
-            if st.button(f"🔍 สั่ง AI เจาะลึกพื้นฐาน {ticker} (Pro Mode)", type="primary"):
+            if st.button(f"🔍 สั่ง AI เจาะลึกพื้นฐาน {ticker} (Pro Mode)", type="primary", use_container_width=True):
                 if not api_key: st.error("⚠️ กรุณาใส่ API Key ที่แถบด้านซ้ายก่อนครับ")
                 else:
-                    with st.spinner(f"🤖 AI {ai_model_name} กำลังชำแหละงบการเงินและโมเดลธุรกิจของ {ticker}..."):
+                    with st.spinner(f"🤖 AI {ai_model_name} กำลังชำแหละงบการเงิน..."):
                         try:
                             model = get_ai_model(api_key, ai_model_name)
                             fundamental_prompt = f"""
                             คุณคือนักวิเคราะห์หุ้นระดับกองทุน หุ้นที่ต้องการวิเคราะห์คือ: {ticker}
                             เงื่อนไข: ตอบเป็นภาษาไทยแบบเข้าใจง่าย ไม่ทางการเกินไป ห้ามมั่วข้อมูล อธิบายศัพท์ยากในวงเล็บ
-                            
                             จงวิเคราะห์ตาม 12 หัวข้อนี้:
                             1) บริษัทนี้ทำธุรกิจอะไร (สินค้าหลัก, รายได้หลัก)
                             2) ลูกค้าของบริษัทคือใคร
@@ -286,10 +327,15 @@ try:
                             """
                             response = model.generate_content(fundamental_prompt)
                             st.markdown(f"<div class='ai-analysis-box' style='font-size: 1.05em;'>{response.text}</div>", unsafe_allow_html=True)
-                        except Exception as e:
+                        except Exception:
                             st.error(f"⚠️ เกิดข้อผิดพลาด กรุณารอสักครู่แล้วลองใหม่")
 
     else:
         st.warning("ไม่พบข้อมูลสินทรัพย์")
 except Exception as e:
     st.error(f"ระบบขัดข้อง: {e}")
+
+# 🌟 คำสั่ง Auto-Refresh 🌟
+if auto_refresh:
+    time.sleep(60) 
+    st.rerun()
