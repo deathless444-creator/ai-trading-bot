@@ -30,6 +30,39 @@ st.markdown("""
     .ai-analysis-box { background-color: #161b22; padding: 20px; border-radius: 10px; border: 1px solid #30363d; margin-bottom: 15px; }
     
     .warning-box { background-color: #332b00; padding: 15px; border-radius: 10px; border-left: 5px solid #ffcc00; margin-top: 10px; color: #ffdd33;}
+    
+    /* 🌟 สไตล์สำหรับแถบวิ่งราคาหุ้น (Ticker Tape) 🌟 */
+    .ticker-wrap {
+        width: 100%;
+        overflow: hidden;
+        background-color: #161b22;
+        padding: 10px 0;
+        border-bottom: 1px solid #30363d;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }
+    .ticker {
+        display: inline-flex;
+        white-space: nowrap;
+        animation: ticker 30s linear infinite;
+    }
+    .ticker:hover {
+        animation-play-state: paused; /* หยุดวิ่งเมื่อเอาเมาส์ชี้ */
+    }
+    .ticker__item {
+        padding: 0 30px;
+        font-size: 1.1em;
+        font-weight: bold;
+        color: #f0f6fc;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    @keyframes ticker {
+        0% { transform: translateX(100%); }
+        100% { transform: translateX(-100%); }
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -85,10 +118,8 @@ def get_stock_news(ticker):
 with st.sidebar:
     st.markdown("<h1>⚙️ Advanced Settings</h1>", unsafe_allow_html=True)
     
-    # [ส่วน API Key]
     saved_api_key = cookies.get("gemini_api_key", "")
     api_key = st.text_input("🔑 Gemini API Key", value=saved_api_key, type="password")
-    
     if api_key and api_key != saved_api_key:
         cookies["gemini_api_key"] = api_key
         cookies.save()
@@ -101,11 +132,7 @@ with st.sidebar:
     )
     
     st.markdown("---")
-    
-    # 🌟 [ระบบ Favorites ใหม่] 🌟
     st.subheader("⭐ หุ้นโปรด (Watchlist)")
-    
-    # ดึงรายชื่อหุ้นที่เคยเซฟไว้ออกมาจากคุกกี้
     fav_str = cookies.get("fav_tickers", "")
     fav_list = [x.strip() for x in fav_str.split(",") if x.strip()]
     
@@ -117,10 +144,9 @@ with st.sidebar:
     
     st.markdown("---")
     st.subheader("🎯 ค้นหาสินทรัพย์")
-    quick_tickers = ["NVDA", "AVGO", "ONDS", "RKLB", "GC=F (ทองคำ)"]
+    quick_tickers = ["NVDA", "AVGO", "ONDS", "RKLB", "GC=F"]
     selected_quick = st.selectbox("รายการด่วน:", quick_tickers)
     
-    # เช็คว่าผู้ใช้กดเลือกจาก Favorites หรือพิมพ์เอง
     if selected_fav != "-- ไม่เลือก --":
         default_ticker = selected_fav
     else:
@@ -128,14 +154,13 @@ with st.sidebar:
         
     ticker = st.text_input("พิมพ์ Ticker เอง:", value=default_ticker).upper().strip()
     
-    # 🌟 [ปุ่ม Add / Remove Favorites] 🌟
     if ticker:
         if ticker in fav_list:
             if st.button(f"❌ เอา {ticker} ออกจากรายการโปรด", use_container_width=True):
                 fav_list.remove(ticker)
                 cookies["fav_tickers"] = ",".join(fav_list)
                 cookies.save()
-                st.rerun() # รีเฟรชหน้าจอเพื่อให้ปุ่มอัปเดตทันที
+                st.rerun()
         else:
             if st.button(f"⭐ เพิ่ม {ticker} ลงรายการโปรด", type="primary", use_container_width=True):
                 fav_list.append(ticker)
@@ -151,6 +176,33 @@ with st.sidebar:
     st.subheader("🔄 ระบบเรียลไทม์")
     auto_refresh = st.toggle("เปิด Auto-Refresh (อัปเดตทุก 60 วิ)")
 
+# 🌟 --- 4. สร้างแถบวิ่ง Ticker Tape ด้านบนสุด --- 🌟
+if fav_list:
+    ticker_html = "<div class='ticker-wrap'><div class='ticker'>"
+    for t in fav_list:
+        try:
+            # ใช้ prepost=True เพื่อดึงข้อมูลช่วงเปิด/ปิดตลาดด้วย
+            tkr_data = yf.Ticker(t).history(period="2d", interval="1d", prepost=True)
+            if len(tkr_data) >= 2:
+                curr_price = tkr_data['Close'].iloc[-1]
+                prev_price = tkr_data['Close'].iloc[-2]
+                pct_change = ((curr_price - prev_price) / prev_price) * 100
+                
+                # กำหนดสีและสัญลักษณ์
+                color = "#15f1ac" if pct_change >= 0 else "#fe5d72"
+                sign = "+" if pct_change >= 0 else ""
+                icon = "🟢" if pct_change >= 0 else "🔴"
+                
+                ticker_html += f"<div class='ticker__item'><span>{t}</span> <span>${curr_price:,.2f}</span> <span style='color:{color}; font-size: 0.9em;'>{icon} {sign}{pct_change:.2f}%</span></div>"
+        except Exception:
+            pass # ถ้าดึงตัวไหนไม่สำเร็จให้ข้ามไปก่อนเพื่อไม่ให้เว็บพัง
+    ticker_html += "</div></div>"
+    st.markdown(ticker_html, unsafe_allow_html=True)
+else:
+    # ถ้ายังไม่มี Favorite ให้ขึ้นข้อความแนะนำ
+    st.markdown("<div class='ticker-wrap'><div class='ticker'><div class='ticker__item' style='color:#f9c74f;'>⭐ เพิ่มหุ้นโปรดที่แถบด้านซ้าย เพื่อแสดงราคาแบบ Real-Time ตรงนี้ 📈</div></div></div>", unsafe_allow_html=True)
+
+
 if "Live" in trade_mode:
     period_val, interval_val = "1d", "1m"
     vol_compare_text = "เทียบแท่งต่อแท่ง (ทุก 1 นาที)"
@@ -161,11 +213,11 @@ else:
     period_val, interval_val = "6mo", "1d"
     vol_compare_text = "เทียบวันต่อวัน (Daily)"
 
-st.markdown(f"<h1>🚀 {ticker} Intelligence Dashboard</h1>", unsafe_allow_html=True)
+st.markdown(f"<h1 style='margin-top: -10px;'>🚀 {ticker} Intelligence Dashboard</h1>", unsafe_allow_html=True)
 
 try:
     raw_data = yf.Ticker(ticker)
-    df = raw_data.history(period=period_val, interval=interval_val)
+    df = raw_data.history(period=period_val, interval=interval_val, prepost=True) # เพิ่ม prepost=True ในกราฟหลักด้วย
     
     if not df.empty:
         df = calculate_ta(df)
