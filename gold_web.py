@@ -8,6 +8,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 import email.utils
+from streamlit_cookies_manager import EncryptedCookieManager # 🌟 นำเข้าเครื่องมือจำคุกกี้
 
 # --- 1. ตั้งค่าหน้าตาโปรแกรม (Theme & Layout) ---
 st.set_page_config(page_title="AI Trading Pro Max", layout="wide")
@@ -21,9 +22,14 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+# 🌟 --- ระบบจำ API Key แยกรายบุคคล (Cookies) --- 🌟
+# ตั้งรหัสผ่านเพื่อเข้ารหัส Key ป้องกันคนแฮก (ไม่ต้องเปลี่ยนรหัสในวงเล็บนี้)
+cookies = EncryptedCookieManager(prefix="aitrading", password="super_secret_trading_password_123")
+if not cookies.ready():
+    st.stop() # สั่งให้ระบบหยุดรอ 0.1 วินาที เพื่อดึงคีย์เก่าในเบราว์เซอร์ขึ้นมา
+
 # --- 2. ฟังก์ชันตัวช่วยต่างๆ ---
 def get_ai_model(api_key, selected_model):
-    # .strip() เผื่อเผลอก๊อปช่องว่างมา
     genai.configure(api_key=api_key.strip()) 
     return genai.GenerativeModel(selected_model)
 
@@ -84,10 +90,19 @@ def get_stock_news(ticker):
 # --- 3. แถบข้าง (Sidebar) สำหรับตั้งค่า ---
 with st.sidebar:
     st.title("⚙️ ตั้งค่าระบบ")
-    api_key = st.text_input("🔑 Gemini API Key", type="password")
+    
+    # 🌟 ดึงคีย์เก่าที่เคยเซฟไว้ในเบราว์เซอร์ขึ้นมา
+    saved_api_key = cookies.get("gemini_api_key", "")
+    
+    api_key = st.text_input("🔑 Gemini API Key", value=saved_api_key, type="password")
+    
+    # 🌟 ถ้ามีการกรอกคีย์ใหม่ ให้เซฟลงในเบราว์เซอร์ทันที
+    if api_key and api_key != saved_api_key:
+        cookies["gemini_api_key"] = api_key
+        cookies.save()
+        st.success("✅ บันทึก Key ลงเครื่องนี้แล้ว! (กด F5 ได้ไม่หาย)")
     
     st.markdown("---")
-    # 🌟 อัปเดตรายชื่อโมเดลให้ตรงกับที่มีในระบบจริงๆ 🌟
     st.subheader("🤖 เลือกโมเดล AI")
     ai_model_name = st.selectbox("เลือกรุ่นที่ต้องการใช้งาน:", 
         [
