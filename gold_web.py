@@ -23,8 +23,8 @@ st.markdown("""
 
 # --- 2. ฟังก์ชันตัวช่วยต่างๆ ---
 def get_ai_model(api_key, selected_model):
-    genai.configure(api_key=api_key)
-    # รับชื่อรุ่น AI มาจากเมนูด้านซ้ายมือ
+    # .strip() เผื่อเผลอก๊อปช่องว่างมา
+    genai.configure(api_key=api_key.strip()) 
     return genai.GenerativeModel(selected_model)
 
 def generate_ai_response(model, prompt):
@@ -36,8 +36,7 @@ def generate_ai_response(model, prompt):
         if "429" in error_msg or "quota" in error_msg:
             return "<div class='warning-box'>⏳ <b>ระบบป้องกันสแปมทำงาน:</b> โควต้า API ถูกใช้งานถี่เกินไป รบกวนพักรอประมาณ 30 วินาที แล้วกดปุ่มใหม่อีกครั้งนะครับ</div>"
         elif "404" in error_msg:
-            # 🌟 ถ้าเจอ 404 ให้แนะนำผู้ใช้ไปเปลี่ยนรุ่น AI ด้านซ้ายมือ
-            return f"<div class='warning-box'>⚠️ <b>ไม่พบรุ่น AI นี้ (Error 404):</b> API Key ของคุณอาจไม่รองรับโมเดลนี้ รบกวนไปที่แถบตั้งค่าด้านซ้าย แล้วลองเปลี่ยน <b>'โมเดล AI'</b> เป็นรุ่นอื่น (เช่น gemini-pro) ดูนะครับ</div>"
+            return f"<div class='warning-box'>⚠️ <b>ไม่พบรุ่น AI นี้ (Error 404):</b> รบกวนไปที่แถบตั้งค่าด้านซ้าย แล้วลองเปลี่ยนโมเดล AI เป็นรุ่นอื่นดูนะครับ</div>"
         else:
             return f"<div class='warning-box'>⚠️ <b>พบข้อผิดพลาด:</b> {e}</div>"
 
@@ -88,10 +87,15 @@ with st.sidebar:
     api_key = st.text_input("🔑 Gemini API Key", type="password")
     
     st.markdown("---")
-    # 🌟 เพิ่มเมนูเลือกชื่อรุ่น AI ตรงนี้
+    # 🌟 อัปเดตรายชื่อโมเดลให้ตรงกับที่มีในระบบจริงๆ 🌟
     st.subheader("🤖 เลือกโมเดล AI")
-    ai_model_name = st.selectbox("หากขึ้น Error 404 ให้ลองเปลี่ยนรุ่น:", 
-        ["gemini-1.5-flash", "gemini-pro", "gemini-1.5-flash-latest", "gemini-1.5-pro"]
+    ai_model_name = st.selectbox("เลือกรุ่นที่ต้องการใช้งาน:", 
+        [
+            "gemini-3.5-flash", 
+            "gemini-2.5-flash", 
+            "gemini-flash-latest", 
+            "gemini-2.0-flash"
+        ]
     )
     
     st.markdown("---")
