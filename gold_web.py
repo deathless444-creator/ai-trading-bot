@@ -1,1 +1,394 @@
+import streamlit as st
+import google.generativeai as genai
+import yfinance as yf
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import pandas as pd
+import urllib.request
+import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta, timezone
+import email.utils
+import time
+from streamlit_cookies_manager import EncryptedCookieManager
+
+# --- 1. ตั้งค่าหน้าตาโปรแกรม (Theme & Layout) ---
+st.set_page_config(page_title="AI Trading Pro Suite", layout="wide")
+
+st.markdown("""
+    <style>
+    .stApp { background-color: #0e1117; color: #f0f6fc; }
+    .main { background-color: #0e1117; }
+    header { visibility: hidden; }
+    
+    div.stMetric { background-color: #161b22; padding: 15px; border-radius: 10px; border: 1px solid #30363d; text-align: center; }
+    div.stDataframe { border: 1px solid #30363d; border-radius: 10px; }
+    
+    .smc-box { background-color: #161b22; padding: 20px; border-radius: 10px; border: 1px solid #30363d; margin-bottom: 15px; }
+    .smc-title { color: #f9c74f; font-size: 1.1em; font-weight: bold; display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .smc-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #30363d; font-size: 0.95em; }
+    
+    .ai-analysis-box { background-color: #161b22; padding: 20px; border-radius: 10px; border: 1px solid #30363d; margin-bottom: 15px; }
+    
+    .warning-box { background-color: #332b00; padding: 15px; border-radius: 10px; border-left: 5px solid #ffcc00; margin-top: 10px; color: #ffdd33;}
+    
+    /* 🌟 สไตล์สำหรับแถบวิ่งราคาหุ้น (Ticker Tape) 🌟 */
+    .ticker-wrap {
+        width: 100%;
+        overflow: hidden;
+        background-color: #161b22;
+        padding: 10px 0;
+        border-bottom: 1px solid #30363d;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }
+    .ticker {
+        display: inline-flex;
+        white-space: nowrap;
+        animation: ticker 30s linear infinite;
+    }
+    .ticker:hover {
+        animation-play-state: paused; /* หยุดวิ่งเมื่อเอาเมาส์ชี้ */
+    }
+    .ticker__item {
+        padding: 0 30px;
+        font-size: 1.1em;
+        font-weight: bold;
+        color: #f0f6fc;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    @keyframes ticker {
+        0% { transform: translateX(100%); }
+        100% { transform: translateX(-100%); }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- ระบบจำ API Key และ Favorites (Cookies) ---
+cookies = EncryptedCookieManager(prefix="aitradingpro", password="super_secret_trading_password_123")
+if not cookies.ready():
+    st.stop()
+
+# --- 2. ฟังก์ชันตัวช่วยต่างๆ ---
+def get_ai_model(api_key, selected_model):
+    genai.configure(api_key=api_key.strip()) 
+    return genai.GenerativeModel(selected_model)
+
+def calculate_ta(df):
+    df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
+    df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
+    delta = df['Close'].diff()
+    gain = delta.clip(lower=0)
+    loss = -1 * delta.clip(upper=0)
+    ema_up = gain.ewm(com=13, adjust=False).mean()
+    ema_down = loss.ewm(com=13, adjust=False).mean()
+    rs = ema_up / ema_down
+    df['RSI'] = 100 - (100 / (1 + rs))
+    return df
+
+def get_stock_news(ticker):
+    try:
+        search_query = "Gold+prices+news" if "GC=F" in ticker else f"{ticker}+stock+news"
+        url = f"https://news.google.com/rss/search?q={search_query}&hl=en-US&gl=US&ceid=US:en"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        response = urllib.request.urlopen(req)
+        root = ET.fromstring(response.read())
+        
+        news_items = []
+        now_utc = datetime.now(timezone.utc)
+        seven_days_ago = now_utc - timedelta(days=7)
+        tz_th = timezone(timedelta(hours=7))
+        
+        for item in root.findall('.//item'):
+            title = item.find('title').text
+            link = item.find('link').text
+            pubDate_str = item.find('pubDate').text
+            parsed_date = email.utils.parsedate_to_datetime(pubDate_str)
+            if parsed_date >= seven_days_ago:
+                local_time = parsed_date.astimezone(tz_th)
+                news_items.append({'title': title, 'link': link, 'date': local_time.strftime('%d/%m/%Y %H:%M')})
+            if len(news_items) >= 5: break
+        return news_items
+    except Exception:
+        return []
+
+# --- 3. แถบข้าง (Sidebar) สำหรับตั้งค่า ---
+with st.sidebar:
+    st.markdown("<h1>⚙️ Advanced Settings</h1>", unsafe_allow_html=True)
+    
+    saved_api_key = cookies.get("gemini_api_key", "")
+    api_key = st.text_input("🔑 Gemini API Key", value=saved_api_key, type="password")
+    if api_key and api_key != saved_api_key:
+        cookies["gemini_api_key"] = api_key
+        cookies.save()
+        st.success("✅ บันทึก Key แล้ว!")
+    
+    st.markdown("---")
+    st.subheader("🤖 เลือกโมเดล AI")
+    ai_model_name = st.selectbox("เลือกรุ่นที่ต้องการใช้งาน:", 
+        ["gemini-3.5-flash", "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash"]
+    )
+    
+    st.markdown("---")
+    st.subheader("⭐ หุ้นโปรด (Watchlist)")
+    fav_str = cookies.get("fav_tickers", "")
+    fav_list = [x.strip() for x in fav_str.split(",") if x.strip()]
+    
+    selected_fav = "-- ไม่เลือก --"
+    if fav_list:
+        selected_fav = st.selectbox("เลือกเปิดกราฟจากรายการโปรด:", ["-- ไม่เลือก --"] + fav_list)
+    else:
+        st.info("คุณยังไม่ได้บันทึกหุ้นโปรด")
+    
+    st.markdown("---")
+    st.subheader("🎯 ค้นหาสินทรัพย์")
+    quick_tickers = ["NVDA", "AVGO", "ONDS", "RKLB", "GC=F"]
+    selected_quick = st.selectbox("รายการด่วน:", quick_tickers)
+    
+    if selected_fav != "-- ไม่เลือก --":
+        default_ticker = selected_fav
+    else:
+        default_ticker = selected_quick.split(" ")[0]
+        
+    ticker = st.text_input("พิมพ์ Ticker เอง:", value=default_ticker).upper().strip()
+    
+    if ticker:
+        if ticker in fav_list:
+            if st.button(f"❌ เอา {ticker} ออกจากรายการโปรด", use_container_width=True):
+                fav_list.remove(ticker)
+                cookies["fav_tickers"] = ",".join(fav_list)
+                cookies.save()
+                st.rerun()
+        else:
+            if st.button(f"⭐ เพิ่ม {ticker} ลงรายการโปรด", type="primary", use_container_width=True):
+                fav_list.append(ticker)
+                cookies["fav_tickers"] = ",".join(fav_list)
+                cookies.save()
+                st.rerun()
+    
+    st.markdown("---")
+    st.subheader("⏱️ โหมดหน้าจอกราฟ")
+    trade_mode = st.radio("เลือก Timeframe:", ["🔴 Live (กราฟ 1 นาที)", "⚡ Intraday (15 นาที)", "📅 Daily (รายวัน)"])
+    
+    st.markdown("---")
+    st.subheader("🔄 ระบบเรียลไทม์")
+    auto_refresh = st.toggle("เปิด Auto-Refresh (อัปเดตทุก 60 วิ)")
+
+# 🌟 --- 4. สร้างแถบวิ่ง Ticker Tape ด้านบนสุด --- 🌟
+if fav_list:
+    ticker_html = "<div class='ticker-wrap'><div class='ticker'>"
+    for t in fav_list:
+        try:
+            # ใช้ prepost=True เพื่อดึงข้อมูลช่วงเปิด/ปิดตลาดด้วย
+            tkr_data = yf.Ticker(t).history(period="2d", interval="1d", prepost=True)
+            if len(tkr_data) >= 2:
+                curr_price = tkr_data['Close'].iloc[-1]
+                prev_price = tkr_data['Close'].iloc[-2]
+                pct_change = ((curr_price - prev_price) / prev_price) * 100
+                
+                # กำหนดสีและสัญลักษณ์
+                color = "#15f1ac" if pct_change >= 0 else "#fe5d72"
+                sign = "+" if pct_change >= 0 else ""
+                icon = "🟢" if pct_change >= 0 else "🔴"
+                
+                ticker_html += f"<div class='ticker__item'><span>{t}</span> <span>${curr_price:,.2f}</span> <span style='color:{color}; font-size: 0.9em;'>{icon} {sign}{pct_change:.2f}%</span></div>"
+        except Exception:
+            pass # ถ้าดึงตัวไหนไม่สำเร็จให้ข้ามไปก่อนเพื่อไม่ให้เว็บพัง
+    ticker_html += "</div></div>"
+    st.markdown(ticker_html, unsafe_allow_html=True)
+else:
+    # ถ้ายังไม่มี Favorite ให้ขึ้นข้อความแนะนำ
+    st.markdown("<div class='ticker-wrap'><div class='ticker'><div class='ticker__item' style='color:#f9c74f;'>⭐ เพิ่มหุ้นโปรดที่แถบด้านซ้าย เพื่อแสดงราคาแบบ Real-Time ตรงนี้ 📈</div></div></div>", unsafe_allow_html=True)
+
+
+if "Live" in trade_mode:
+    period_val, interval_val = "1d", "1m"
+    vol_compare_text = "เทียบแท่งต่อแท่ง (ทุก 1 นาที)"
+elif "Intraday" in trade_mode:
+    period_val, interval_val = "5d", "15m"
+    vol_compare_text = "เทียบแท่งต่อแท่ง (ทุก 15 นาที)"
+else:
+    period_val, interval_val = "6mo", "1d"
+    vol_compare_text = "เทียบวันต่อวัน (Daily)"
+
+st.markdown(f"<h1 style='margin-top: -10px;'>🚀 {ticker} Intelligence Dashboard</h1>", unsafe_allow_html=True)
+
+try:
+    raw_data = yf.Ticker(ticker)
+    df = raw_data.history(period=period_val, interval=interval_val, prepost=True) # เพิ่ม prepost=True ในกราฟหลักด้วย
+    
+    if not df.empty:
+        df = calculate_ta(df)
+        current_price = df['Close'].iloc[-1]
+        
+        tab1, tab2, tab3, tab4 = st.tabs(["📈 กราฟเทคนิค & สแกน", "💰 วางแผน DCA", "📰 ข่าว & ตลาด", "🏢 เจาะลึกพื้นฐานหุ้น (Pro)"])
+        
+        # ================= TAB 1: กราฟหลัก & AI Pro Panel =================
+        with tab1:
+            left_col, right_col = st.columns([2, 1])
+            with left_col:
+                if "Daily" in trade_mode: 
+                    x_labels = df.index.strftime('%Y-%m-%d')
+                else: 
+                    x_labels = df.index.strftime('%H:%M')
+                    
+                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
+                fig.add_trace(go.Candlestick(x=x_labels, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price'), row=1, col=1)
+                fig.add_trace(go.Line(x=x_labels, y=df['EMA20'], name='EMA20', line=dict(color='yellow', width=1)), row=1, col=1)
+                fig.add_trace(go.Line(x=x_labels, y=df['EMA50'], name='EMA50', line=dict(color='cyan', width=1)), row=1, col=1)
+                
+                colors = ['red' if row['Open'] - row['Close'] >= 0 else 'green' for index, row in df.iterrows()]
+                fig.add_trace(go.Bar(x=x_labels, y=df['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
+                
+                fig.update_layout(height=500, template="plotly_dark", xaxis_rangeslider_visible=False, margin=dict(l=0, r=0, t=10, b=0), xaxis_type='category', xaxis_nticks=10)
+                fig.update_xaxes(type='category', nticks=10, row=2, col=1)
+                st.plotly_chart(fig, use_container_width=True)
+                
+            with right_col:
+                st.markdown("<h3 style='margin-bottom: 10px;'>🤖 AI Advanced Analysis</h3>", unsafe_allow_html=True)
+                
+                if st.button(f"⚡ วิเคราะห์โครงสร้าง {ticker} ของจริง", use_container_width=True):
+                    if not api_key: st.error("กรุณาใส่ API Key ด้านซ้ายก่อนครับ")
+                    else:
+                        with st.spinner(f"กำลังส่งข้อมูล {ticker} ให้ AI ประมวลผล..."):
+                            try:
+                                model = get_ai_model(api_key, ai_model_name)
+                                data_str = df[['Close', 'Volume', 'EMA20', 'EMA50', 'RSI']].tail(15).to_string()
+                                
+                                prompt = f"""
+                                คุณคือนักวิเคราะห์เทคนิคขั้นสูง วิเคราะห์ข้อมูล 15 แท่งล่าสุดของ {ticker}. ราคาปัจจุบันคือ {current_price:.2f}
+                                ข้อมูล: {data_str}
+                                
+                                จงตอบกลับมาในรูปแบบบรรทัดต่อบรรทัดแบบนี้เท่านั้น ห้ามพิมพ์อย่างอื่น:
+                                TREND: [Bullish หรือ Bearish หรือ Neutral]
+                                ZONE: [Premium หรือ Discount หรือ Equilibrium]
+                                SIGNAL: [BUY หรือ SELL หรือ WAIT]
+                                CONF: [ตัวเลขความมั่นใจ 0-100]
+                                ENTRY: [ราคาเข้า]
+                                SL: [ราคาตัดขาดทุน]
+                                TP: [ราคาทำกำไร]
+                                REASON: [อธิบายเหตุผลสั้นๆ 1-2 บรรทัด]
+                                """
+                                
+                                response = model.generate_content(prompt)
+                                res_text = response.text
+                                
+                                parsed_data = {"TREND": "-", "ZONE": "-", "SIGNAL": "-", "CONF": "-", "ENTRY": "-", "SL": "-", "TP": "-", "REASON": res_text}
+                                for line in res_text.strip().split('\n'):
+                                    if ":" in line:
+                                        key, val = line.split(":", 1)
+                                        parsed_data[key.strip().upper()] = val.strip()
+
+                                sig = parsed_data.get("SIGNAL", "WAIT").upper()
+                                if "BUY" in sig:
+                                    s_color, s_bg, s_icon = "#15f1ac", "#0d2e23", "🟢 BUY"
+                                elif "SELL" in sig:
+                                    s_color, s_bg, s_icon = "#fe5d72", "#311116", "🔴 SELL"
+                                else:
+                                    s_color, s_bg, s_icon = "#f9c74f", "#332b00", "🟡 WAIT"
+
+                                real_smc_html = f"""
+                                <div class='smc-box'>
+                                    <div class='smc-title'>⚙️ Market Structure: {ticker}</div>
+                                    <div class='smc-row'>Overall Trend: <span style='color: {s_color}'>{parsed_data.get('TREND', '-')}</span></div>
+                                    <div class='smc-row'>Market Zone: <span>{parsed_data.get('ZONE', '-')}</span></div>
+                                    <div class='smc-row'>Current RSI: <span>{df['RSI'].iloc[-1]:.1f}</span></div>
+                                </div>
+                                
+                                <div class='ai-analysis-box'>
+                                    <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;'>
+                                        <div style='color: {s_color}; font-weight: bold; border: 2px solid {s_color}; padding: 5px 15px; border-radius: 20px; font-size: 1.2em;'>{s_icon} {ticker}</div>
+                                        <div style='background-color: {s_bg}; color: {s_color}; padding: 5px 15px; border-radius: 20px; font-weight: bold;'>{parsed_data.get('CONF', '50')}% Confidence</div>
+                                    </div>
+                                    <div style='font-size: 0.9em; line-height: 1.8; color: #f0f6fc; margin-bottom: 15px;'>
+                                        <b>Entry Target:</b> {parsed_data.get('ENTRY', '-')}<br/>
+                                        <b style='color: #fe5d72'>Stop Loss:</b> {parsed_data.get('SL', '-')}<br/>
+                                        <b style='color: #15f1ac'>Take Profit:</b> {parsed_data.get('TP', '-')}
+                                    </div>
+                                    <h4 style='color: #f9c74f; font-size: 1em; margin-bottom: 5px;'>🧠 AI Reasoning:</h4>
+                                    <p style='color: #a0a0a0; font-size: 0.85em; line-height: 1.6;'>{parsed_data.get('REASON', '-')}</p>
+                                </div>
+                                """
+                                st.markdown(real_smc_html, unsafe_allow_html=True)
+
+                            except Exception as e:
+                                error_msg = str(e).lower()
+                                if "429" in error_msg or "quota" in error_msg:
+                                    st.error("⏳ โควต้าใช้งานถี่เกินไป รบกวนรอ 30 วินาทีครับ")
+                                else:
+                                    st.error(f"⚠️ ข้อผิดพลาด: {e}")
+                else:
+                    st.info(f"👈 กดปุ่มด้านบนเพื่อให้ AI วิเคราะห์กราฟของ {ticker} แบบ Real-time ครับ")
+
+        # ================= TAB 2: วางแผน DCA =================
+        with tab2:
+            st.subheader("🗓️ เครื่องมือวางแผน DCA รายเดือน")
+            dca_budget = st.number_input("งบประมาณ DCA ต่อเดือน (USD $)", min_value=10, value=500, step=50)
+            st.info(f"💡 ด้วยงบ **${dca_budget}** คุณสามารถสะสม {ticker} ได้ประมาณ **{dca_budget / current_price:.4f} หุ้น** ที่ราคาปัจจุบัน (${current_price:,.2f})")
+            
+            if st.button("🤖 ให้ AI ช่วยวางแผนแบ่งไม้ DCA", use_container_width=True):
+                if not api_key: st.error("กรุณาใส่ API Key")
+                else:
+                    with st.spinner(f"กำลังคำนวณแนวรับด้วย {ai_model_name}..."):
+                        model = get_ai_model(api_key, ai_model_name)
+                        data_str = df[['High', 'Low', 'Close']].tail(30).to_string()
+                        prompt = f"ฉันต้องการ DCA หุ้น {ticker} เดือนนี้ด้วยงบ ${dca_budget} ราคาปัจจุบันคือ ${current_price}\nนี่คือข้อมูลราคา 30 แท่งล่าสุด: {data_str}\nช่วยวางแผนแบ่งเงินซื้อสะสม เพื่อลดความเสี่ยง อธิบายสั้นๆ เข้าใจง่าย"
+                        try:
+                            response = model.generate_content(prompt)
+                            st.markdown(f"<div class='ai-analysis-box'>{response.text}</div>", unsafe_allow_html=True)
+                        except Exception:
+                            st.error("ระบบขัดข้อง กรุณาลองใหม่")
+
+        # ================= TAB 3: News & Sentiment =================
+        with tab3:
+            st.subheader("📰 ข่าวสารล่าสุด")
+            news_list = get_stock_news(ticker)
+            if news_list:
+                for n in news_list:
+                    st.markdown(f"🗓️ **{n['date']}** | 🔗 **[{n['title']}]({n['link']})**")
+            else:
+                st.info("ไม่มีข่าวสำคัญใหม่ๆ เกี่ยวกับสินทรัพย์นี้ในช่วง 7 วันที่ผ่านมาครับ")
+
+        # ================= TAB 4: Fundamental Analysis =================
+        with tab4:
+            st.markdown(f"<h2>🏢 เจาะลึกพื้นฐานธุรกิจ: {ticker}</h2>", unsafe_allow_html=True)
+            if st.button(f"🔍 สั่ง AI เจาะลึกพื้นฐาน {ticker} (Pro Mode)", type="primary", use_container_width=True):
+                if not api_key: st.error("⚠️ กรุณาใส่ API Key ที่แถบด้านซ้ายก่อนครับ")
+                else:
+                    with st.spinner(f"🤖 AI {ai_model_name} กำลังชำแหละงบการเงิน..."):
+                        try:
+                            model = get_ai_model(api_key, ai_model_name)
+                            fundamental_prompt = f"""
+                            คุณคือนักวิเคราะห์หุ้นระดับกองทุน หุ้นที่ต้องการวิเคราะห์คือ: {ticker}
+                            เงื่อนไข: ตอบเป็นภาษาไทยแบบเข้าใจง่าย ไม่ทางการเกินไป ห้ามมั่วข้อมูล อธิบายศัพท์ยากในวงเล็บ
+                            จงวิเคราะห์ตาม 12 หัวข้อนี้:
+                            1) บริษัทนี้ทำธุรกิจอะไร (สินค้าหลัก, รายได้หลัก)
+                            2) ลูกค้าของบริษัทคือใคร
+                            3) โมเดลรายได้และคุณภาพรายได้ (recurring หรือขายขาด)
+                            4) ภาพรวมงบการเงินล่าสุด (รายได้, กำไร, หนี้สิน)
+                            5) เช็คคุณภาพพื้นฐานแบบง่าย (สรุปว่า พื้นฐานดี, ดีแต่ระวัง, หรือไม่แข็งแรง)
+                            6) จุดแข็งของธุรกิจ (Moat)
+                            7) โอกาสโตในอนาคต
+                            8) ความเสี่ยงที่ต้องรู้
+                            9) ผู้บริหารและการเล่าเรื่อง
+                            10) สรุปให้มือใหม่ตัดสินใจ
+                            11) ให้คะแนน 1-10 (คุณภาพรายได้, งบ, การเติบโต, ความเสี่ยง)
+                            12) สรุปสั้นๆ ว่าน่าลงทุนไหม
+                            """
+                            response = model.generate_content(fundamental_prompt)
+                            st.markdown(f"<div class='ai-analysis-box' style='font-size: 1.05em;'>{response.text}</div>", unsafe_allow_html=True)
+                        except Exception:
+                            st.error(f"⚠️ เกิดข้อผิดพลาด กรุณารอสักครู่แล้วลองใหม่")
+
+    else:
+        st.warning("ไม่พบข้อมูลสินทรัพย์")
+except Exception as e:
+    st.error(f"ระบบขัดข้อง: {e}")
+
+# 🌟 คำสั่ง Auto-Refresh 🌟
+if auto_refresh:
+    time.sleep(60) 
+    st.rerun()
 
