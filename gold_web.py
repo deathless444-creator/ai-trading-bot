@@ -3,7 +3,7 @@ import google.generativeai as genai
 import yfinance as yf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import pandas as p
+import pandas as pd
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
