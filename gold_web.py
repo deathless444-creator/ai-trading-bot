@@ -22,8 +22,8 @@ st.markdown("""
 
 # --- 2. ฟังก์ชันตัวช่วยต่างๆ ---
 
-# 🌟 ฟังก์ชันค้นหาชื่อที่ใช้ได้ และให้ระบบ "จำ" ไว้เพื่อประหยัดโควต้า
-@st.cache_resource
+# 🌟 เปลี่ยนจาก resource เป็น data ตรงนี้ครับ
+@st.cache_data 
 def get_best_model_name(api_key):
     genai.configure(api_key=api_key)
     best_name = "gemini-pro" # รุ่นสำรองที่ใช้ได้ชัวร์ๆ
@@ -39,10 +39,23 @@ def get_best_model_name(api_key):
 
 def get_ai_model(api_key):
     genai.configure(api_key=api_key)
-    model_name = get_best_model_name(api_key) # เรียกชื่อที่จำไว้มาใช้
+    model_name = get_best_model_name(api_key) 
     return genai.GenerativeModel(model_name)
 
 # ------------------------------
+
+def calculate_ta(df):
+    df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
+    df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
+    
+    delta = df['Close'].diff()
+    gain = delta.clip(lower=0)
+    loss = -1 * delta.clip(upper=0)
+    ema_up = gain.ewm(com=13, adjust=False).mean()
+    ema_down = loss.ewm(com=13, adjust=False).mean()
+    rs = ema_up / ema_down
+    df['RSI'] = 100 - (100 / (1 + rs))
+    return df
 
 # 🌟 ฟังก์ชันดึงข่าว (อัปเกรด: แสดงวันที่ + กรอง 7 วันล่าสุด + ปรับเวลาท้องถิ่น)
 def get_stock_news(ticker):
