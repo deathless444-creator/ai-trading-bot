@@ -21,24 +21,28 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- 2. ฟังก์ชันตัวช่วยต่างๆ ---
-@st.cache_resource # 🌟 เพิ่มบรรทัดนี้เพื่อให้เว็บจดจำ AI ไว้ จะได้ไม่เรียกซ้ำให้เปลืองโควต้า
+
+# 🌟 ฟังก์ชันค้นหาชื่อที่ใช้ได้ และให้ระบบ "จำ" ไว้เพื่อประหยัดโควต้า
+@st.cache_resource
+def get_best_model_name(api_key):
+    genai.configure(api_key=api_key)
+    best_name = "gemini-pro" # รุ่นสำรองที่ใช้ได้ชัวร์ๆ
+    try:
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                best_name = m.name
+                if 'flash' in m.name:
+                    break
+    except:
+        pass
+    return best_name
+
 def get_ai_model(api_key):
     genai.configure(api_key=api_key)
-    # ลบระบบค้นหาอัตโนมัติทิ้ง แล้วล็อคชื่อรุ่นที่เร็วและเสถียรที่สุดไปเลย
-    return genai.GenerativeModel("gemini-1.5-flash")
+    model_name = get_best_model_name(api_key) # เรียกชื่อที่จำไว้มาใช้
+    return genai.GenerativeModel(model_name)
 
-def calculate_ta(df):
-    df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
-    df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
-    
-    delta = df['Close'].diff()
-    gain = delta.clip(lower=0)
-    loss = -1 * delta.clip(upper=0)
-    ema_up = gain.ewm(com=13, adjust=False).mean()
-    ema_down = loss.ewm(com=13, adjust=False).mean()
-    rs = ema_up / ema_down
-    df['RSI'] = 100 - (100 / (1 + rs))
-    return df
+# ------------------------------
 
 # 🌟 ฟังก์ชันดึงข่าว (อัปเกรด: แสดงวันที่ + กรอง 7 วันล่าสุด + ปรับเวลาท้องถิ่น)
 def get_stock_news(ticker):
