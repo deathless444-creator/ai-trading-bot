@@ -21,15 +21,11 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- 2. ฟังก์ชันตัวช่วยต่างๆ ---
+@st.cache_resource # 🌟 เพิ่มบรรทัดนี้เพื่อให้เว็บจดจำ AI ไว้ จะได้ไม่เรียกซ้ำให้เปลืองโควต้า
 def get_ai_model(api_key):
     genai.configure(api_key=api_key)
-    model_name = "gemini-pro" 
-    for m in genai.list_models():
-        if 'generateContent' in m.supported_generation_methods:
-            model_name = m.name
-            if 'flash' in m.name:
-                break
-    return genai.GenerativeModel(model_name)
+    # ลบระบบค้นหาอัตโนมัติทิ้ง แล้วล็อคชื่อรุ่นที่เร็วและเสถียรที่สุดไปเลย
+    return genai.GenerativeModel("gemini-1.5-flash")
 
 def calculate_ta(df):
     df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
