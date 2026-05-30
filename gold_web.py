@@ -22,10 +22,10 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- 2. ฟังก์ชันตัวช่วยต่างๆ ---
-def get_ai_model(api_key):
+def get_ai_model(api_key, selected_model):
     genai.configure(api_key=api_key)
-    # 🌟 ล็อคชื่อรุ่น AI ไปเลยตรงๆ ตัดปัญหาการเช็คชื่อที่ทำให้เปลืองโควต้าและขึ้น Error แดง
-    return genai.GenerativeModel("gemini-1.5-flash")
+    # รับชื่อรุ่น AI มาจากเมนูด้านซ้ายมือ
+    return genai.GenerativeModel(selected_model)
 
 def generate_ai_response(model, prompt):
     try:
@@ -35,8 +35,11 @@ def generate_ai_response(model, prompt):
         error_msg = str(e).lower()
         if "429" in error_msg or "quota" in error_msg:
             return "<div class='warning-box'>⏳ <b>ระบบป้องกันสแปมทำงาน:</b> โควต้า API ถูกใช้งานถี่เกินไป รบกวนพักรอประมาณ 30 วินาที แล้วกดปุ่มใหม่อีกครั้งนะครับ</div>"
+        elif "404" in error_msg:
+            # 🌟 ถ้าเจอ 404 ให้แนะนำผู้ใช้ไปเปลี่ยนรุ่น AI ด้านซ้ายมือ
+            return f"<div class='warning-box'>⚠️ <b>ไม่พบรุ่น AI นี้ (Error 404):</b> API Key ของคุณอาจไม่รองรับโมเดลนี้ รบกวนไปที่แถบตั้งค่าด้านซ้าย แล้วลองเปลี่ยน <b>'โมเดล AI'</b> เป็นรุ่นอื่น (เช่น gemini-pro) ดูนะครับ</div>"
         else:
-            return f"<div class='warning-box'>⚠️ <b>พบข้อผิดพลาด:</b> {e} (ถ้าเป็น 404 ให้ตรวจสอบความถูกต้องของ API Key)</div>"
+            return f"<div class='warning-box'>⚠️ <b>พบข้อผิดพลาด:</b> {e}</div>"
 
 def calculate_ta(df):
     df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
@@ -83,6 +86,13 @@ def get_stock_news(ticker):
 with st.sidebar:
     st.title("⚙️ ตั้งค่าระบบ")
     api_key = st.text_input("🔑 Gemini API Key", type="password")
+    
+    st.markdown("---")
+    # 🌟 เพิ่มเมนูเลือกชื่อรุ่น AI ตรงนี้
+    st.subheader("🤖 เลือกโมเดล AI")
+    ai_model_name = st.selectbox("หากขึ้น Error 404 ให้ลองเปลี่ยนรุ่น:", 
+        ["gemini-1.5-flash", "gemini-pro", "gemini-1.5-flash-latest", "gemini-1.5-pro"]
+    )
     
     st.markdown("---")
     st.subheader("🎯 เลือกสินทรัพย์")
@@ -161,8 +171,8 @@ try:
             if st.button("⚡ สแกนกราฟด้วย AI (Technical Analysis)"):
                 if not api_key: st.error("กรุณาใส่ API Key")
                 else:
-                    with st.spinner("กำลังวิเคราะห์อินดิเคเตอร์..."):
-                        model = get_ai_model(api_key)
+                    with st.spinner(f"กำลังวิเคราะห์อินดิเคเตอร์ด้วย {ai_model_name}..."):
+                        model = get_ai_model(api_key, ai_model_name)
                         data_str = df[['Close', 'Volume', 'EMA20', 'RSI']].tail(15).to_string()
                         prompt = f"คุณคือนักเทรดกราฟเทคนิค วิเคราะห์ข้อมูล 15 แท่งล่าสุดของ {ticker}: {data_str}\nช่วยสรุป: 1. เทรนด์ปัจจุบัน 2. จุดเข้าซื้อ/ตัดขาดทุน 3. สภาพ Volume สั้นๆ ตรงประเด็น"
                         
@@ -178,8 +188,8 @@ try:
             if st.button("🤖 ให้ AI ช่วยวางแผนแบ่งไม้ DCA"):
                 if not api_key: st.error("กรุณาใส่ API Key")
                 else:
-                    with st.spinner("กำลังคำนวณแนวรับเพื่อแบ่งไม้ DCA..."):
-                        model = get_ai_model(api_key)
+                    with st.spinner(f"กำลังคำนวณแนวรับด้วย {ai_model_name}..."):
+                        model = get_ai_model(api_key, ai_model_name)
                         data_str = df[['High', 'Low', 'Close']].tail(30).to_string()
                         prompt = f"ฉันต้องการ DCA หุ้น {ticker} เดือนนี้ด้วยงบ ${dca_budget} ราคาปัจจุบันคือ ${current_price}\nนี่คือข้อมูลราคา 30 แท่งล่าสุด: {data_str}\nช่วยวางแผนแบ่งเงินซื้อสะสม เพื่อลดความเสี่ยง อธิบายสั้นๆ เข้าใจง่าย"
                         
@@ -202,8 +212,8 @@ try:
                 if st.button("🧠 ให้ AI วิเคราะห์ Sentiment จากข่าว"):
                     if not api_key: st.error("กรุณาใส่ API Key")
                     else:
-                        with st.spinner("กำลังสรุปทิศทางข่าว..."):
-                            model = get_ai_model(api_key)
+                        with st.spinner(f"กำลังสรุปทิศทางข่าวด้วย {ai_model_name}..."):
+                            model = get_ai_model(api_key, ai_model_name)
                             prompt = f"ข่าวล่าสุดของตลาด {ticker} ในรอบสัปดาห์มีดังนี้: {valid_titles} \nข่าวเหล่านี้ส่งผลเชิงบวกหรือเชิงลบต่อทิศทางราคา? สรุปสั้นๆ เป็นข้อๆ"
                             
                             html_response = generate_ai_response(model, prompt)
