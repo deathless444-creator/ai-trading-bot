@@ -14,17 +14,14 @@ from streamlit_cookies_manager import EncryptedCookieManager
 # --- 1. ตั้งค่าหน้าตาโปรแกรม (Theme & Layout) ---
 st.set_page_config(page_title="AI Trading Pro Suite", layout="wide", initial_sidebar_state="expanded")
 
-# 🌟 แก้ปัญหาปุ่ม Sidebar หาย โดยยกเลิกการซ่อน header ทั้งหมด 🌟
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: #f0f6fc; }
     .main { background-color: #0e1117; }
     
-    /* ซ่อนเฉพาะเมนู 3 จุดของ Streamlit ด้านขวาบน (ถ้าอยากให้ดูโปร) */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
-    /* สไตล์กล่องข้อมูล Metric ให้ดูเป็น Card สวยๆ */
     [data-testid="stMetric"] { 
         background-color: #161b22; 
         padding: 15px; 
@@ -91,7 +88,7 @@ def get_stock_news(ticker):
                 news_items.append({'title': title, 'link': link, 'date': local_time.strftime('%d/%m/%Y %H:%M')})
             if len(news_items) >= 5: break
         return news_items
-    except Exception:
+    except Exception as e:
         return []
 
 # --- 3. แถบข้าง (Sidebar) สำหรับตั้งค่า ---
@@ -114,7 +111,6 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("🎯 ค้นหาสินทรัพย์")
     
-    # 🌟 ช่องพิมพ์ชื่อหุ้น คุมด้วย Session State 🌟
     search_input = st.text_input("พิมพ์ Ticker ที่ต้องการดู:", value=st.session_state.active_ticker).upper().strip()
     
     if search_input and search_input != st.session_state.active_ticker:
@@ -123,7 +119,6 @@ with st.sidebar:
 
     ticker = st.session_state.active_ticker
     
-    # ดึงข้อมูลรายการโปรด
     fav_str = cookies.get("fav_tickers", "")
     fav_list = [x.strip() for x in fav_str.split(",") if x.strip()]
     
@@ -150,7 +145,6 @@ with st.sidebar:
 # 🌟 --- 4. Dashboard Cards (โชว์กรอบสี่เหลี่ยมหุ้นโปรด) --- 🌟
 if fav_list:
     st.markdown("### ⭐ My Watchlist")
-    # แบ่งการ์ดเป็นแถวๆ ละ 4 กล่อง เพื่อความสวยงาม
     num_cols = 4 
     for i in range(0, len(fav_list), num_cols):
         cols = st.columns(num_cols)
@@ -159,21 +153,20 @@ if fav_list:
                 t = fav_list[i + j]
                 with col:
                     try:
-                        # ดึงข้อมูลเร็วๆ เพื่อโชว์บนการ์ด
                         tkr_data = yf.Ticker(t).history(period="2d", interval="1d", prepost=True)
                         if len(tkr_data) >= 2:
                             curr_price = tkr_data['Close'].iloc[-1]
                             prev_price = tkr_data['Close'].iloc[-2]
                             pct_change = ((curr_price - prev_price) / prev_price) * 100
                             
-                            # โชว์ Metric สวยๆ
                             st.metric(label=t, value=f"${curr_price:,.2f}", delta=f"{pct_change:+.2f}%")
                             
-                            # ปุ่มกดดูกราฟ
                             if st.button(f"📊 ดูกราฟ {t}", key=f"btn_{t}", use_container_width=True):
                                 st.session_state.active_ticker = t
                                 st.rerun()
-                    except:
+                        else:
+                            st.warning(f"ข้อมูล {t} ไม่พอ")
+                    except Exception as e: # 🌟 แก้บั๊กรีเฟรชไม่ได้ตรงบรรทัดนี้ครับ! 🌟
                         st.error(f"โหลด {t} ไม่ได้")
     st.markdown("---")
 
@@ -285,7 +278,17 @@ try:
             st.subheader("🗓️ เครื่องมือวางแผน DCA รายเดือน")
             dca_budget = st.number_input("งบประมาณ DCA ต่อเดือน (USD $)", min_value=10, value=500, step=50)
             if st.button("🤖 ให้ AI ช่วยวางแผนแบ่งไม้ DCA"):
-                st.info("กำลังเรียก AI...") # ตัดโค้ดเพื่อความกระชับ สามารถก๊อปตัวเต็มเดิมมาวางทับส่วนนี้ได้
+                if not api_key: st.error("กรุณาใส่ API Key")
+                else:
+                    with st.spinner(f"กำลังคำนวณแนวรับด้วย {ai_model_name}..."):
+                        model = get_ai_model(api_key, ai_model_name)
+                        data_str = df[['High', 'Low', 'Close']].tail(30).to_string()
+                        prompt = f"ฉันต้องการ DCA หุ้น {ticker} เดือนนี้ด้วยงบ ${dca_budget} ราคาปัจจุบันคือ ${current_price}\nนี่คือข้อมูลราคา 30 แท่งล่าสุด: {data_str}\nช่วยวางแผนแบ่งเงินซื้อสะสม เพื่อลดความเสี่ยง อธิบายสั้นๆ เข้าใจง่าย"
+                        try:
+                            response = model.generate_content(prompt)
+                            st.markdown(f"<div class='ai-analysis-box'>{response.text}</div>", unsafe_allow_html=True)
+                        except Exception as e:
+                            st.error("ระบบขัดข้อง กรุณาลองใหม่")
 
         # ================= TAB 3: ข่าว =================
         with tab3:
@@ -297,7 +300,32 @@ try:
         with tab4:
             st.markdown(f"<h2>🏢 เจาะลึกพื้นฐานธุรกิจ: {ticker}</h2>", unsafe_allow_html=True)
             if st.button(f"🔍 สั่ง AI เจาะลึกพื้นฐาน {ticker} (Pro Mode)", type="primary"):
-                st.info("กำลังเรียก AI วิเคราะห์พื้นฐาน 12 ข้อ...") # ตัดโค้ดเพื่อความกระชับ สามารถก๊อปตัวเต็มเดิมมาวางทับส่วนนี้ได้
+                if not api_key: st.error("⚠️ กรุณาใส่ API Key ที่แถบด้านซ้ายก่อนครับ")
+                else:
+                    with st.spinner(f"🤖 AI {ai_model_name} กำลังชำแหละงบการเงิน..."):
+                        try:
+                            model = get_ai_model(api_key, ai_model_name)
+                            fundamental_prompt = f"""
+                            คุณคือนักวิเคราะห์หุ้นระดับกองทุน หุ้นที่ต้องการวิเคราะห์คือ: {ticker}
+                            เงื่อนไข: ตอบเป็นภาษาไทยแบบเข้าใจง่าย ไม่ทางการเกินไป ห้ามมั่วข้อมูล อธิบายศัพท์ยากในวงเล็บ
+                            จงวิเคราะห์ตาม 12 หัวข้อนี้:
+                            1) บริษัทนี้ทำธุรกิจอะไร (สินค้าหลัก, รายได้หลัก)
+                            2) ลูกค้าของบริษัทคือใคร
+                            3) โมเดลรายได้และคุณภาพรายได้ (recurring หรือขายขาด)
+                            4) ภาพรวมงบการเงินล่าสุด (รายได้, กำไร, หนี้สิน)
+                            5) เช็คคุณภาพพื้นฐานแบบง่าย (สรุปว่า พื้นฐานดี, ดีแต่ระวัง, หรือไม่แข็งแรง)
+                            6) จุดแข็งของธุรกิจ (Moat)
+                            7) โอกาสโตในอนาคต
+                            8) ความเสี่ยงที่ต้องรู้
+                            9) ผู้บริหารและการเล่าเรื่อง
+                            10) สรุปให้มือใหม่ตัดสินใจ
+                            11) ให้คะแนน 1-10 (คุณภาพรายได้, งบ, การเติบโต, ความเสี่ยง)
+                            12) สรุปสั้นๆ ว่าน่าลงทุนไหม
+                            """
+                            response = model.generate_content(fundamental_prompt)
+                            st.markdown(f"<div class='ai-analysis-box' style='font-size: 1.05em;'>{response.text}</div>", unsafe_allow_html=True)
+                        except Exception as e:
+                            st.error(f"⚠️ เกิดข้อผิดพลาด กรุณารอสักครู่แล้วลองใหม่")
 
     else:
         st.warning("ไม่พบข้อมูลสินทรัพย์")
