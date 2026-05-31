@@ -166,7 +166,7 @@ if fav_list:
                                 st.rerun()
                         else:
                             st.warning(f"ข้อมูล {t} ไม่พอ")
-                    except Exception as e: # 🌟 แก้บั๊กรีเฟรชไม่ได้ตรงบรรทัดนี้ครับ! 🌟
+                    except Exception as e:
                         st.error(f"โหลด {t} ไม่ได้")
     st.markdown("---")
 
@@ -220,7 +220,16 @@ try:
                             try:
                                 model = get_ai_model(api_key, ai_model_name)
                                 data_str = df[['Close', 'Volume', 'EMA20', 'EMA50', 'RSI']].tail(15).to_string()
+                                
+                                # 🌟 อัปเกรด Prompt บังคับความสมเหตุสมผลของ R:R และแก้ปัญหาตั้งราคาชิดเกินไป 🌟
                                 prompt = f"""วิเคราะห์ทางเทคนิค 15 แท่งล่าสุดของ {ticker}. ราคาปัจจุบัน {current_price:.2f}. ข้อมูล: {data_str}
+                                
+                                กฎเหล็กในการให้จุดเข้า (Entry), ตัดขาดทุน (SL) และ ทำกำไร (TP):
+                                1. การตั้ง SL และ TP ต้องห่างจาก Entry อย่างสมเหตุสมผลเพื่อเผื่อค่า Spread (ห้ามตั้งชิดเกินไปเช่นห่างแค่ 1-5 เซนต์)
+                                2. หากให้ SIGNAL เป็น BUY (แทงขึ้น): SL ต้องต่ำกว่า Entry อย่างสมเหตุสมผล และ TP ต้องสูงกว่า Entry โดยมี Risk/Reward อย่างน้อย 1:1.5
+                                3. หากให้ SIGNAL เป็น SELL (แทงลง): SL ต้องสูงกว่า Entry อย่างสมเหตุสมผล และ TP ต้องต่ำกว่า Entry โดยมี Risk/Reward อย่างน้อย 1:1.5
+                                4. หากให้ SIGNAL เป็น WAIT: ระบุ Entry เป็นจุดแนวรับ/ต้านสำคัญที่ควร "รอเข้า" พร้อมตั้ง SL/TP ให้สอดคล้องกัน
+
                                 ตอบกลับตามฟอร์แมตเป๊ะๆ:
                                 TREND: [Bullish หรือ Bearish หรือ Neutral]
                                 ZONE: [Premium หรือ Discount หรือ Equilibrium]
@@ -229,7 +238,7 @@ try:
                                 ENTRY: [ราคาเข้า]
                                 SL: [ราคาตัดขาดทุน]
                                 TP: [ราคาทำกำไร]
-                                REASON: [เหตุผล 2 บรรทัด]"""
+                                REASON: [อธิบายเหตุผลแผนเทรด 2 บรรทัดให้ชัดเจนว่าเป็นฝั่ง Long หรือ Short]"""
                                 
                                 response = model.generate_content(prompt)
                                 res_text = response.text
