@@ -212,10 +212,13 @@ try:
         with tab1:
             left_col, right_col = st.columns([2, 1])
             with left_col:
+                # 🌟 แก้ไขแกน X ตรงนี้ครับ เพื่อไม่ให้กราฟพันกัน 🌟
                 if "Daily" in trade_mode: 
                     x_labels = df.index.strftime('%Y-%m-%d')
+                elif "Intraday" in trade_mode:
+                    x_labels = df.index.strftime('%d/%m %H:%M') # เพิ่ม วัน/เดือน เข้าไป
                 else: 
-                    x_labels = df.index.strftime('%H:%M')
+                    x_labels = df.index.strftime('%H:%M') # Live 1m ดึงแค่วันเดียว ใช้เวลาอย่างเดียวได้
                     
                 fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
                 fig.add_trace(go.Candlestick(x=x_labels, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price'), row=1, col=1)
@@ -228,7 +231,7 @@ try:
                 fig.update_layout(height=500, template="plotly_dark", xaxis_rangeslider_visible=False, margin=dict(l=0, r=0, t=10, b=0), xaxis_type='category', xaxis_nticks=10)
                 fig.update_xaxes(type='category', nticks=10, row=2, col=1)
                 
-                # 🌟 เพิ่ม config={'scrollZoom': True} ตรงนี้ครับ 🌟
+                # รองรับ Scroll Zoom เหมือนเดิม
                 st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True})
                 
             with right_col:
