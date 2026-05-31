@@ -227,7 +227,9 @@ try:
                 
                 fig.update_layout(height=500, template="plotly_dark", xaxis_rangeslider_visible=False, margin=dict(l=0, r=0, t=10, b=0), xaxis_type='category', xaxis_nticks=10)
                 fig.update_xaxes(type='category', nticks=10, row=2, col=1)
-                st.plotly_chart(fig, use_container_width=True)
+                
+                # 🌟 เพิ่ม config={'scrollZoom': True} ตรงนี้ครับ 🌟
+                st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True})
                 
             with right_col:
                 st.markdown("<h3 style='margin-bottom: 10px;'>🤖 AI Advanced Analysis</h3>", unsafe_allow_html=True)
@@ -239,8 +241,6 @@ try:
                             try:
                                 model = get_ai_model(api_key, ai_model_name)
                                 data_str = df[['Close', 'Volume', 'EMA20', 'EMA50', 'RSI']].tail(15).to_string()
-                                
-                                # 🌟 แก้ไข Prompt บังคับโหมด Long/Spot เท่านั้น 🌟
                                 prompt = f"""วิเคราะห์ทางเทคนิค 15 แท่งล่าสุดของ {ticker}. ราคาปัจจุบัน {current_price:.2f}. ข้อมูล: {data_str}
                                 
                                 ⚠️ กฎเหล็ก: ผู้ใช้งานเทรดฝั่ง "ซื้อเพื่อขึ้น" (Long/Spot) เท่านั้น! ห้ามวางแผนฝั่ง Short เด็ดขาด!
@@ -274,7 +274,6 @@ try:
                                 if "BUY" in sig:
                                     s_color, s_bg, s_icon = "#15f1ac", "#0d2e23", "🟢 BUY"
                                 else:
-                                    # ยึดหลัก WAIT เป็นหลักถ้าไม่ใช่ BUY เพราะเราตัดโหมด SELL (Short) ทิ้งไปแล้ว
                                     s_color, s_bg, s_icon = "#f9c74f", "#332b00", "🟡 WAIT"
 
                                 real_smc_html = f"""
@@ -298,7 +297,7 @@ try:
                                 </div>
                                 """
                                 st.markdown(real_smc_html, unsafe_allow_html=True)
-                            except Exception as e:
+                            except Exception:
                                 st.error("ติดปัญหาโควต้า API รอสักครู่แล้วกดใหม่ครับ")
                 else:
                     st.info("👈 กดปุ่มด้านบนเพื่อให้ AI วิเคราะห์กราฟแบบ Real-time ครับ")
