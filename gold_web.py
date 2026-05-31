@@ -88,7 +88,7 @@ def get_stock_news(ticker):
                 news_items.append({'title': title, 'link': link, 'date': local_time.strftime('%d/%m/%Y %H:%M')})
             if len(news_items) >= 5: break
         return news_items
-    except Exception as e:
+    except Exception:
         return []
 
 # --- 3. แถบข้าง (Sidebar) สำหรับตั้งค่า ---
@@ -166,7 +166,7 @@ if fav_list:
                                 st.rerun()
                         else:
                             st.warning(f"ข้อมูล {t} ไม่พอ")
-                    except Exception as e:
+                    except Exception:
                         st.error(f"โหลด {t} ไม่ได้")
     st.markdown("---")
 
@@ -178,14 +178,33 @@ elif "Intraday" in trade_mode:
 else:
     period_val, interval_val = "6mo", "1d"
 
-st.markdown(f"<h1 style='margin-top: -10px;'>🚀 {ticker} Intelligence Dashboard</h1>", unsafe_allow_html=True)
-
 try:
-    df = yf.Ticker(ticker).history(period=period_val, interval=interval_val, prepost=True)
+    raw_ticker = yf.Ticker(ticker)
+    df = raw_ticker.history(period=period_val, interval=interval_val, prepost=True)
     
     if not df.empty:
         df = calculate_ta(df)
         current_price = df['Close'].iloc[-1]
+        
+        try:
+            comp_name = raw_ticker.info.get('shortName', ticker)
+        except:
+            comp_name = ticker
+            
+        try:
+            hist_2d = raw_ticker.history(period="2d", interval="1d", prepost=True)
+            if len(hist_2d) >= 2:
+                prev_close = hist_2d['Close'].iloc[-2]
+                pct_change = ((current_price - prev_close) / prev_close) * 100
+                color = "#15f1ac" if pct_change >= 0 else "#fe5d72"
+                sign = "+" if pct_change >= 0 else ""
+                price_display = f"<span style='color: {color}; margin-left: 15px;'>${current_price:,.2f} <span style='font-size: 0.6em;'>({sign}{pct_change:.2f}%)</span></span>"
+            else:
+                price_display = f"<span style='margin-left: 15px;'>${current_price:,.2f}</span>"
+        except:
+            price_display = f"<span style='margin-left: 15px;'>${current_price:,.2f}</span>"
+
+        st.markdown(f"<h1 style='margin-top: -10px; display: flex; align-items: center; flex-wrap: wrap;'>🚀 {ticker} <span style='font-size: 0.5em; color: #8b949e; margin-left: 10px; font-weight: normal; margin-right: 5px;'>({comp_name})</span> {price_display}</h1>", unsafe_allow_html=True)
         
         tab1, tab2, tab3, tab4 = st.tabs(["📈 กราฟเทคนิค & สแกน", "💰 วางแผน DCA", "📰 ข่าว & ตลาด", "🏢 เจาะลึกพื้นฐานหุ้น (Pro)"])
         
@@ -221,24 +240,27 @@ try:
                                 model = get_ai_model(api_key, ai_model_name)
                                 data_str = df[['Close', 'Volume', 'EMA20', 'EMA50', 'RSI']].tail(15).to_string()
                                 
-                                # 🌟 อัปเกรด Prompt บังคับความสมเหตุสมผลของ R:R และแก้ปัญหาตั้งราคาชิดเกินไป 🌟
+                                # 🌟 แก้ไข Prompt บังคับโหมด Long/Spot เท่านั้น 🌟
                                 prompt = f"""วิเคราะห์ทางเทคนิค 15 แท่งล่าสุดของ {ticker}. ราคาปัจจุบัน {current_price:.2f}. ข้อมูล: {data_str}
                                 
-                                กฎเหล็กในการให้จุดเข้า (Entry), ตัดขาดทุน (SL) และ ทำกำไร (TP):
-                                1. การตั้ง SL และ TP ต้องห่างจาก Entry อย่างสมเหตุสมผลเพื่อเผื่อค่า Spread (ห้ามตั้งชิดเกินไปเช่นห่างแค่ 1-5 เซนต์)
-                                2. หากให้ SIGNAL เป็น BUY (แทงขึ้น): SL ต้องต่ำกว่า Entry อย่างสมเหตุสมผล และ TP ต้องสูงกว่า Entry โดยมี Risk/Reward อย่างน้อย 1:1.5
-                                3. หากให้ SIGNAL เป็น SELL (แทงลง): SL ต้องสูงกว่า Entry อย่างสมเหตุสมผล และ TP ต้องต่ำกว่า Entry โดยมี Risk/Reward อย่างน้อย 1:1.5
-                                4. หากให้ SIGNAL เป็น WAIT: ระบุ Entry เป็นจุดแนวรับ/ต้านสำคัญที่ควร "รอเข้า" พร้อมตั้ง SL/TP ให้สอดคล้องกัน
+                                ⚠️ กฎเหล็ก: ผู้ใช้งานเทรดฝั่ง "ซื้อเพื่อขึ้น" (Long/Spot) เท่านั้น! ห้ามวางแผนฝั่ง Short เด็ดขาด!
 
-                                ตอบกลับตามฟอร์แมตเป๊ะๆ:
+                                เงื่อนไขการให้จุดเข้า (Entry), ตัดขาดทุน (SL) และ ทำกำไร (TP):
+                                1. Take Profit (TP) ต้อง "สูงกว่า" Entry เสมอ
+                                2. Stop Loss (SL) ต้อง "ต่ำกว่า" Entry เสมอ
+                                3. หากกราฟสวยพร้อมเข้าซื้อ ให้ SIGNAL เป็น BUY
+                                4. หากกราฟเป็นขาลง/ยังไม่สวย ให้ SIGNAL เป็น WAIT และหาจุด "รอเข้าซื้อที่แนวรับ" (Entry ต้องต่ำกว่าราคาปัจจุบัน)
+                                5. ระยะ SL และ TP ต้องสมเหตุสมผล ไม่ชิดเกินไป (Risk/Reward 1:1.5 ขึ้นไป)
+
+                                ตอบกลับตามฟอร์แมตเป๊ะๆ ห้ามพิมพ์อย่างอื่น:
                                 TREND: [Bullish หรือ Bearish หรือ Neutral]
                                 ZONE: [Premium หรือ Discount หรือ Equilibrium]
-                                SIGNAL: [BUY หรือ SELL หรือ WAIT]
+                                SIGNAL: [BUY หรือ WAIT]
                                 CONF: [ความมั่นใจ 0-100]
-                                ENTRY: [ราคาเข้า]
+                                ENTRY: [ราคาเข้าซื้อ]
                                 SL: [ราคาตัดขาดทุน]
                                 TP: [ราคาทำกำไร]
-                                REASON: [อธิบายเหตุผลแผนเทรด 2 บรรทัดให้ชัดเจนว่าเป็นฝั่ง Long หรือ Short]"""
+                                REASON: [อธิบายเหตุผลแผนเทรด 2 บรรทัด]"""
                                 
                                 response = model.generate_content(prompt)
                                 res_text = response.text
@@ -251,9 +273,8 @@ try:
                                 sig = parsed_data.get("SIGNAL", "WAIT").upper()
                                 if "BUY" in sig:
                                     s_color, s_bg, s_icon = "#15f1ac", "#0d2e23", "🟢 BUY"
-                                elif "SELL" in sig:
-                                    s_color, s_bg, s_icon = "#fe5d72", "#311116", "🔴 SELL"
                                 else:
+                                    # ยึดหลัก WAIT เป็นหลักถ้าไม่ใช่ BUY เพราะเราตัดโหมด SELL (Short) ทิ้งไปแล้ว
                                     s_color, s_bg, s_icon = "#f9c74f", "#332b00", "🟡 WAIT"
 
                                 real_smc_html = f"""
@@ -296,7 +317,7 @@ try:
                         try:
                             response = model.generate_content(prompt)
                             st.markdown(f"<div class='ai-analysis-box'>{response.text}</div>", unsafe_allow_html=True)
-                        except Exception as e:
+                        except Exception:
                             st.error("ระบบขัดข้อง กรุณาลองใหม่")
 
         # ================= TAB 3: ข่าว =================
@@ -333,12 +354,14 @@ try:
                             """
                             response = model.generate_content(fundamental_prompt)
                             st.markdown(f"<div class='ai-analysis-box' style='font-size: 1.05em;'>{response.text}</div>", unsafe_allow_html=True)
-                        except Exception as e:
+                        except Exception:
                             st.error(f"⚠️ เกิดข้อผิดพลาด กรุณารอสักครู่แล้วลองใหม่")
 
     else:
+        st.markdown(f"<h1 style='margin-top: -10px;'>🚀 {ticker} Intelligence Dashboard</h1>", unsafe_allow_html=True)
         st.warning("ไม่พบข้อมูลสินทรัพย์")
 except Exception as e:
+    st.markdown(f"<h1 style='margin-top: -10px;'>🚀 {ticker} Intelligence Dashboard</h1>", unsafe_allow_html=True)
     st.error(f"ระบบขัดข้อง: {e}")
 
 if auto_refresh:
